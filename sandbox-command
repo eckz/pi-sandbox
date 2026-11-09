@@ -1,0 +1,11 @@
+#!/bin/sh
+
+cmd=${0##*/}
+
+printf 'You are running inside a docker sandbox, the command `%s' "$cmd" >&2
+for arg do
+  printf ' %s' "$arg" >&2
+done
+printf '` should not be executed\n' >&2
+
+exit 1

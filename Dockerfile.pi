@@ -1,0 +1,67 @@
+FROM debian:bookworm-slim
+
+ARG HOST_UID=1000
+ARG HOST_GID=1000
+
+RUN groupadd --gid "$HOST_GID" sandbox \
+  && useradd --uid "$HOST_UID" --gid sandbox --shell /bin/bash --create-home sandbox
+
+ENV APT_DEPENDENCIES="bash ca-certificates curl wget git ripgrep \
+        clang mold pkg-config libx11-dev libxkbcommon-dev libwayland-dev \
+        libudev-dev libudev1 libasound2-dev"
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends $APT_DEPENDENCIES \
+  && apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false \
+  && rm -rf /var/lib/apt/lists/*
+
+### Sandboxing commands
+COPY sandbox-command /usr/local/bin/sandbox-command
+
+RUN chmod +x /usr/local/bin/sandbox-command \
+  && for cmd in sudo su apt apt-get dpkg systemctl service shutdown reboot; do \
+       ln -sf sandbox-command "/usr/local/bin/$cmd"; \
+     done
+
+
+### Environment setup
+
+ENV HOME=/home/sandbox
+
+ENV CARGO_HOME=$HOME/.cargo \
+    RUSTUP_HOME=$HOME/.rustup \
+    PATH="$HOME/.local/bin:$HOME/.cargo/bin:${PATH}"
+
+USER sandbox
+
+### Rust toolchain
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      -o /tmp/rustup-init.sh \
+  && sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable \
+  && rm /tmp/rustup-init.sh
+
+RUN mkdir -p $CARGO_HOME \
+  && printf '%s\n' \
+    "[target.'cfg(target_os = \"linux\")']" \
+    'linker = "clang"' \
+    'rustflags = ["-C", "link-arg=-fuse-ld=mold"]' \
+    > $CARGO_HOME/config.toml
+
+### Mise
+
+RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run \
+      -o /tmp/mise-install.sh \
+      && sh /tmp/mise-install.sh \
+      && rm /tmp/mise-install.sh \
+      && mise use --global python@3 \
+      && mise use --global node@24
+
+WORKDIR /workspace
+
+## Install pi coding agent
+
+RUN mise exec -- npm install -g --ignore-scripts @earendil-works/pi-coding-agent \
+    && mise exec -- pi --version
+
+ENTRYPOINT ["mise", "exec", "--"]

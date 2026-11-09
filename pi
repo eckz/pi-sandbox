@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+sandbox_home=/home/sandbox
+
+project_dir="$(pwd -P)"
+folder="${project_dir##*/}"
+container_dir="/workspace/${folder:-root}"
+
+mounts=()
+
+# add_mount <source> <target> [ro]
+# Skips sources that do not exist, since bind mounts fail on a missing source.
+add_mount() {
+  local src=$1 dest=$2 flags=
+
+  case ${3:-} in
+    "") ;;
+    ro) flags=,readonly ;;
+    *)
+      echo "add_mount: invalid mode '$3' for '$2' (expected 'ro')" >&2
+      return 1
+      ;;
+  esac
+
+  [[ -e "$src" ]] || return 0
+
+  # Bind mount sources must be absolute and free of symlinks.
+  src="$(realpath "$src")"
+
+  mounts+=(--mount "type=bind,source=$src,target=$dest$flags")
+}
+
+add_mount "$project_dir" "$container_dir"
+add_mount "$project_dir/.git" "$container_dir/.git" ro
+
+host_cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+
+if [[ -d "$host_cargo_home" ]]; then
+  mkdir -p "$host_cargo_home/registry" "$host_cargo_home/git"
+
+  add_mount "$host_cargo_home/registry" "$sandbox_home/.cargo/registry"
+  add_mount "$host_cargo_home/git" "$sandbox_home/.cargo/git"
+fi
+
+add_mount "${NPM_CONFIG_CACHE:-$HOME/.npm}" "$sandbox_home/.npm"
+add_mount "${AGENTS_SKILLS_DIR:-$HOME/.agents/skills}" "$sandbox_home/.agents/skills" ro
+
+exec docker run --rm -it \
+  "${mounts[@]}" \
+  --pull never \
+  -v pi-agent-home:$sandbox_home/.pi/agent \
+  --workdir "$container_dir" \
+  pi-sandbox pi "$@"
