@@ -54,18 +54,11 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
   && sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable \
   && rm /tmp/rustup-init.sh
 
-# Cross-compilation to Windows (see https://bevy-cheatbook.github.io/platforms/windows/wsl2.html)
-RUN rustup target add x86_64-pc-windows-gnu
-
 RUN mkdir -p $CARGO_HOME \
   && printf '%s\n' \
     "[target.'cfg(target_os = \"linux\")']" \
     'linker = "clang"' \
     'rustflags = ["-C", "link-arg=-fuse-ld=mold"]' \
-    '' \
-    '[target.x86_64-pc-windows-gnu]' \
-    'linker = "x86_64-w64-mingw32-gcc"' \
-    'ar = "x86_64-w64-mingw32-ar"' \
     > $CARGO_HOME/config.toml
 
 ### Mise

@@ -1,0 +1,26 @@
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Build artifacts / caches ---
+build/
+dist/
+out/
+__pycache__/
+.cache/
+.npm/
+node_modules/
+vendor/
+target/
+.venv/
+venv/
+
+*.log
+logs/
+tmp/
+
+
+*.tar
+docker-compose.override.yml
+
