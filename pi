@@ -3,6 +3,46 @@ set -euo pipefail
 
 sandbox_home=/home/sandbox
 
+usage() {
+  cat <<'EOF'
+Usage: pi [--shell] [args...]
+
+Runs the pi coding agent in the sandbox container.
+
+Options:
+  --shell    run /bin/bash in the container instead of pi, for testing
+             purposes. It is deliberately not a login shell, because
+             /etc/profile resets PATH and would hide the mise-managed tools
+             (node, npx, npm, python3, pi); extra args are passed to bash, e.g.
+             `pi --shell -c 'cargo build --target x86_64-pc-windows-gnu'`.
+  -h, --help show this help.
+
+Environment:
+  SANDBOX_CMD  command to run in the container instead of `pi`
+               (e.g. SANDBOX_CMD=bash). --shell takes precedence.
+EOF
+}
+
+# Command executed inside the container (ENTRYPOINT is `mise exec --`).
+command=(pi)
+
+case ${1:-} in
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  --shell)
+    shift
+    command=(/bin/bash)
+    ;;
+  "")
+    ;;
+esac
+
+if [[ -n ${SANDBOX_CMD:-} && ${command[0]} == pi ]]; then
+  read -r -a command <<<"$SANDBOX_CMD"
+fi
+
 project_dir="$(pwd -P)"
 folder="${project_dir##*/}"
 container_dir="/workspace/${folder:-root}"
@@ -50,5 +90,6 @@ exec docker run --rm -it \
   "${mounts[@]}" \
   --pull never \
   -v pi-agent-home:$sandbox_home/.pi/agent \
+  --env USER=sandbox \
   --workdir "$container_dir" \
-  pi-sandbox pi "$@"
+  pi-sandbox "${command[@]}" "$@"

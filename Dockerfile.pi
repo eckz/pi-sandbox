@@ -8,7 +8,8 @@ RUN groupadd --gid "$HOST_GID" sandbox \
 
 ENV APT_DEPENDENCIES="bash ca-certificates curl wget git ripgrep \
         clang mold pkg-config libx11-dev libxkbcommon-dev libwayland-dev \
-        libudev-dev libudev1 libasound2-dev"
+        libudev-dev libudev1 libasound2-dev \
+        gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64"
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends $APT_DEPENDENCIES \
@@ -26,11 +27,23 @@ RUN chmod +x /usr/local/bin/sandbox-command \
 
 ### Environment setup
 
-ENV HOME=/home/sandbox
+ENV HOME=/home/sandbox \
+    USER=sandbox \
+    LOGNAME=sandbox \
+    SHELL=/bin/bash
 
 ENV CARGO_HOME=$HOME/.cargo \
     RUSTUP_HOME=$HOME/.rustup \
     PATH="$HOME/.local/bin:$HOME/.cargo/bin:${PATH}"
+
+# /etc/profile resets PATH, hiding the mise-managed tools (node, npx, npm,
+# python3, pi) in login shells. Re-activate mise for them.
+RUN printf '%s\n' \
+      'if [ -x "$HOME/.local/bin/mise" ]; then' \
+      '  eval "$("$HOME/.local/bin/mise" activate bash 2>/dev/null)"' \
+      'fi' \
+      > /etc/profile.d/mise.sh \
+  && chmod 644 /etc/profile.d/mise.sh
 
 USER sandbox
 
@@ -41,11 +54,18 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
   && sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable \
   && rm /tmp/rustup-init.sh
 
+# Cross-compilation to Windows (see https://bevy-cheatbook.github.io/platforms/windows/wsl2.html)
+RUN rustup target add x86_64-pc-windows-gnu
+
 RUN mkdir -p $CARGO_HOME \
   && printf '%s\n' \
     "[target.'cfg(target_os = \"linux\")']" \
     'linker = "clang"' \
     'rustflags = ["-C", "link-arg=-fuse-ld=mold"]' \
+    '' \
+    '[target.x86_64-pc-windows-gnu]' \
+    'linker = "x86_64-w64-mingw32-gcc"' \
+    'ar = "x86_64-w64-mingw32-ar"' \
     > $CARGO_HOME/config.toml
 
 ### Mise
@@ -54,7 +74,7 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run \
       -o /tmp/mise-install.sh \
       && sh /tmp/mise-install.sh \
       && rm /tmp/mise-install.sh \
-      && mise use --global python@3 \
+      && mise use --global python@3.15 \
       && mise use --global node@24
 
 WORKDIR /workspace
