@@ -7,9 +7,12 @@ RUN groupadd --gid "$HOST_GID" sandbox \
   && useradd --uid "$HOST_UID" --gid sandbox --shell /bin/bash --create-home sandbox
 
 ENV APT_DEPENDENCIES="bash ca-certificates curl wget git ripgrep \
+        jq file tree xxd bsdextrautils \
+        zip unzip xz-utils bzip2 zstd \
+        procps lsof \
+        make patch less \
         clang mold pkg-config libx11-dev libxkbcommon-dev libwayland-dev \
-        libudev-dev libudev1 libasound2-dev \
-        gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64"
+        libudev-dev libudev1 libasound2-dev"
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends $APT_DEPENDENCIES \
@@ -24,6 +27,10 @@ RUN chmod +x /usr/local/bin/sandbox-command \
        ln -sf sandbox-command "/usr/local/bin/$cmd"; \
      done
 
+### Sandbox entrypoint
+COPY entrypoint.sh /usr/local/bin/pi-sandbox-entrypoint
+
+RUN chmod +x /usr/local/bin/pi-sandbox-entrypoint
 
 ### Environment setup
 
@@ -51,7 +58,7 @@ USER sandbox
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       -o /tmp/rustup-init.sh \
-  && sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable \
+  && sh /tmp/rustup-init.sh -y --profile default --default-toolchain stable \
   && rm /tmp/rustup-init.sh
 
 RUN mkdir -p $CARGO_HOME \
@@ -61,6 +68,10 @@ RUN mkdir -p $CARGO_HOME \
     'rustflags = ["-C", "link-arg=-fuse-ld=mold"]' \
     > $CARGO_HOME/config.toml
 
+# Cargo cache (mounted at /cache by the pi script).
+RUN ln -s /cache/cargo/registry $CARGO_HOME/registry \
+  && ln -s /cache/cargo/git $CARGO_HOME/git
+
 ### Mise
 
 RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run \
@@ -68,7 +79,8 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL https://mise.run \
       && sh /tmp/mise-install.sh \
       && rm /tmp/mise-install.sh \
       && mise use --global python@3.15 \
-      && mise use --global node@24
+      && mise use --global node@24 \
+      && mise use --global fd@10.5.2
 
 WORKDIR /workspace
 
@@ -77,4 +89,4 @@ WORKDIR /workspace
 RUN mise exec -- npm install -g --ignore-scripts @earendil-works/pi-coding-agent \
     && mise exec -- pi --version
 
-ENTRYPOINT ["mise", "exec", "--"]
+ENTRYPOINT ["/usr/local/bin/pi-sandbox-entrypoint"]

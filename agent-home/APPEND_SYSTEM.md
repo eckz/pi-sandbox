@@ -1,0 +1,4 @@
+- Before each action, briefly reason about the best approach.
+- Unless the changes are trivial, before starting executing any action, present the user the plan to approve it before continuing.
+- Do not try to commit code to git, you don't have permissions for that.
+- You are running inside a docker sandbox that get's replaced after every session, so if a dependency is missing it's better that you tell the user about it

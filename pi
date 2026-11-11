@@ -1,29 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Resolve symlinks so this works when `pi` is linked into PATH.
+script_path="${BASH_SOURCE[0]}"
+while [[ -L $script_path ]]; do
+  link_dir="$(cd -P "$(dirname "$script_path")" && pwd)"
+  script_path="$(readlink "$script_path")"
+  [[ $script_path == /* ]] || script_path="$link_dir/$script_path"
+done
+script_dir="$(cd -P "$(dirname "$script_path")" && pwd)"
+# shellcheck source=container-cli.sh
+source "$script_dir/container-cli.sh"
+
 sandbox_home=/home/sandbox
 
 usage() {
-  cat <<'EOF'
+  cat <<'USAGE'
 Usage: pi [--shell] [args...]
 
-Runs the pi coding agent in the sandbox container.
+Runs the pi coding agent in the sandbox container, using finch if installed,
+otherwise docker. The finch VM (or docker daemon) is started automatically
+when it is not running.
 
 Options:
   --shell    run /bin/bash in the container instead of pi, for testing
-             purposes. It is deliberately not a login shell, because
-             /etc/profile resets PATH and would hide the mise-managed tools
-             (node, npx, npm, python3, pi); extra args are passed to bash, e.g.
-             `pi --shell -c 'cargo build --target x86_64-pc-windows-gnu'`.
+             purposes.
   -h, --help show this help.
 
 Environment:
-  SANDBOX_CMD  command to run in the container instead of `pi`
-               (e.g. SANDBOX_CMD=bash). --shell takes precedence.
-EOF
+  SANDBOX_CMD    command to run in the container instead of `pi`
+                 (e.g. SANDBOX_CMD=bash). --shell takes precedence.
+  CONTAINER_CLI  container CLI to use (finch or docker). Default: finch if
+                 available, otherwise docker.
+USAGE
 }
 
-# Command executed inside the container (ENTRYPOINT is `mise exec --`).
+# Command executed inside the container; the image entrypoint copies
+# agent-home/ into ~/.pi/agent, then runs it through `mise exec --`.
 command=(pi)
 
 case ${1:-} in
@@ -33,7 +46,7 @@ case ${1:-} in
     ;;
   --shell)
     shift
-    command=(/bin/bash)
+    command=(/bin/bash -l)
     ;;
   "")
     ;;
@@ -42,6 +55,55 @@ esac
 if [[ -n ${SANDBOX_CMD:-} && ${command[0]} == pi ]]; then
   read -r -a command <<<"$SANDBOX_CMD"
 fi
+
+select_container_cli
+ensure_container_vm
+
+image=pi-sandbox:latest
+
+if ! "$CONTAINER_CLI" image inspect "$image" >/dev/null 2>&1; then
+  echo "Image $image not found, building it with build-image.sh..." >&2
+  CONTAINER_CLI="$CONTAINER_CLI" "$script_dir/build-image.sh" >&2
+
+  if ! "$CONTAINER_CLI" image inspect "$image" >/dev/null 2>&1; then
+    echo "error: $image is still not available after rebuild" >&2
+    exit 1
+  fi
+fi
+
+# ensure_volume <name>: create the named volume if missing and chown it to
+# `sandbox`, since fresh volumes are root-owned and the container runs as sandbox.
+ensure_volume() {
+  local volume=$1
+
+  if ! "$CONTAINER_CLI" volume inspect "$volume" >/dev/null 2>&1; then
+    "$CONTAINER_CLI" volume create "$volume" >/dev/null
+    "$CONTAINER_CLI" run --rm --pull never --user root --entrypoint chown \
+      -v "$volume:/mnt/volume" \
+      "$image" sandbox:sandbox /mnt/volume
+  fi
+}
+
+ensure_volume pi-agent-home
+
+# Single cache volume shared by all sandbox instances.
+cache_volume=pi-sandbox-cache
+cache_dir=/cache
+
+if ! "$CONTAINER_CLI" volume inspect "$cache_volume" >/dev/null 2>&1; then
+  ensure_volume "$cache_volume"
+  # Subdirs must exist: cargo can't create_dir_all through a dangling symlink.
+  "$CONTAINER_CLI" run --rm --pull never --entrypoint mkdir \
+    -v "$cache_volume:$cache_dir" \
+    "$image" -p "$cache_dir/cargo/registry" "$cache_dir/cargo/git" \
+      "$cache_dir/npm" "$cache_dir/xdg"
+fi
+
+cache_args=(
+  -v "$cache_volume:$cache_dir"
+  --env "NPM_CONFIG_CACHE=$cache_dir/npm"
+  --env "XDG_CACHE_HOME=$cache_dir/xdg"
+)
 
 project_dir="$(pwd -P)"
 folder="${project_dir##*/}"
@@ -71,25 +133,27 @@ add_mount() {
   mounts+=(--mount "type=bind,source=$src,target=$dest$flags")
 }
 
+# Copied into ~/.pi/agent by the image entrypoint on every startup.
+add_mount "$script_dir/agent-home" /run/pi-sandbox/agent-home ro
+
 add_mount "$project_dir" "$container_dir"
 add_mount "$project_dir/.git" "$container_dir/.git" ro
 
-host_cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+# Rust project: keep `target/` in a named volume
+if [[ -f "$project_dir/Cargo.toml" ]]; then
+  safe_name="$(printf '%s' "${folder:-root}" | tr -c 'a-zA-Z0-9_.-\n' '-' | sed 's/^[^a-zA-Z0-9]*//')"
+  target_volume="cargo-target-${safe_name:-project}"
 
-if [[ -d "$host_cargo_home" ]]; then
-  mkdir -p "$host_cargo_home/registry" "$host_cargo_home/git"
+  ensure_volume "$target_volume"
 
-  add_mount "$host_cargo_home/registry" "$sandbox_home/.cargo/registry"
-  add_mount "$host_cargo_home/git" "$sandbox_home/.cargo/git"
+  mounts+=(-v "$target_volume:$container_dir/target")
 fi
 
-add_mount "${NPM_CONFIG_CACHE:-$HOME/.npm}" "$sandbox_home/.npm"
-add_mount "${AGENTS_SKILLS_DIR:-$HOME/.agents/skills}" "$sandbox_home/.agents/skills" ro
-
-exec docker run --rm -it \
+exec "$CONTAINER_CLI" run --rm -it \
   "${mounts[@]}" \
+  "${cache_args[@]}" \
   --pull never \
   -v pi-agent-home:$sandbox_home/.pi/agent \
   --env USER=sandbox \
   --workdir "$container_dir" \
-  pi-sandbox "${command[@]}" "$@"
+  $image "${command[@]}" "$@"

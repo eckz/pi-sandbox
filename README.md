@@ -6,7 +6,10 @@ A sandboxed environment for running [pi](https://pi.dev/), a coding agent harnes
 
 - `Dockerfile.pi` — Docker image definition for the pi sandbox
 - `pi` — launcher script for the sandbox
-- `rebuild.sh` — helper script to rebuild the image
+- `build-image.sh` — helper script to rebuild the image
+- `container-cli.sh` — shared finch/docker detection and startup helpers
+- `entrypoint.sh` — container entrypoint; copies `agent-home/` into `~/.pi/agent`
+- `agent-home/` — files copied into the Pi agent directory on every startup
 - `sandbox-command` — command wrapper for the sandbox
 
 ## Getting started
@@ -14,7 +17,7 @@ A sandboxed environment for running [pi](https://pi.dev/), a coding agent harnes
 Build the image:
 
 ```bash
-./rebuild.sh
+./build-image.sh
 ```
 
 Then run the sandbox using the `pi` launcher script.
