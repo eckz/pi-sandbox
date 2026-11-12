@@ -36,6 +36,7 @@ $RECYCLE.BIN/
 .directory
 
 # --- Editor and temporary files ---
+.idea
 *.swp
 *.swo
 *.swn
