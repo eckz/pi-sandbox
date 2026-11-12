@@ -1,0 +1,51 @@
+# Global gitignore for the pi sandbox.
+#
+# Installed to ~/.config/git/ignore and enabled through core.excludesFile.
+# Keep this list limited to files that are almost never meant to be tracked.
+# Project-specific build artifacts belong in each project's .gitignore.
+
+# --- macOS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.TemporaryItems
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# --- Windows ---
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# --- Linux ---
+.Trash-*
+.directory
+
+# --- Editor and temporary files ---
+*.swp
+*.swo
+*.swn
+*~
+.#*
+\#*#
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+*.crdownload
+*.part

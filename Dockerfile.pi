@@ -89,4 +89,30 @@ WORKDIR /workspace
 RUN mise exec -- npm install -g --ignore-scripts @earendil-works/pi-coding-agent \
     && mise exec -- pi --version
 
+## Install agent skills into ~/.agents/skills (the user-level Pi skills path)
+
+RUN mise exec -- npx --yes skills add https://github.com/warpdotdev/common-skills \
+      --skill resolve-merge-conflicts -g -a pi -y \
+    && mise exec -- npx --yes skills add https://github.com/mattpocock/skills \
+      --skill tdd -g -a pi -y \
+    && test -f "$HOME/.agents/skills/resolve-merge-conflicts/SKILL.md" \
+    && test -f "$HOME/.agents/skills/tdd/SKILL.md" \
+    && rm -rf "$HOME/.npm/_npx"
+
+## The upstream skill uses repo-relative `.agents/skills/...` paths; since this
+## is a global install, point its commands at the user-level copy instead.
+
+RUN sed -i \
+      's#\.agents/skills/resolve-merge-conflicts/scripts/extract_conflict_context\.py#~/.agents/skills/resolve-merge-conflicts/scripts/extract_conflict_context.py#g' \
+      "$HOME/.agents/skills/resolve-merge-conflicts/SKILL.md" \
+    && ! grep -q 'python3 \.agents/skills/' "$HOME/.agents/skills/resolve-merge-conflicts/SKILL.md"
+
+## Global gitignore for all repositories in the sandbox
+
+RUN mkdir -p /home/sandbox/.config/git
+
+COPY --chown=sandbox:sandbox global.gitignore /home/sandbox/.config/git/ignore
+
+RUN git config --global core.excludesFile /home/sandbox/.config/git/ignore
+
 ENTRYPOINT ["/usr/local/bin/pi-sandbox-entrypoint"]
